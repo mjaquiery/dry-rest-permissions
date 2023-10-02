@@ -183,24 +183,28 @@ class DRYPermissions(permissions.BasePermission):
         Setting self.message and self.code are side-effects, so this relies on the fact that
         Django reinstantiates the permission class for each request in APIView.get_permissions().
         """
+        if isinstance(result, bool):
+            return result
+        if isinstance(result, dict):
+            self.code = result.get('code', None)
+            self.message = result.get('message', None)
+            return False
         if isinstance(result, str):
             self.message = result
             return False
         if isinstance(result, int):
             self.code = result
             return False
-        if isinstance(result, dict):
-            if hasattr(result, 'code'):
-                self.code = result.code
-            if hasattr(result, 'message'):
-                self.message = result.message
-            return False
         if isinstance(result, tuple):
             if len(result) == 2:
                 self.message = result[0]
                 self.code = result[1]
             return False
-        return result
+        raise TypeError(
+            (
+                "Unexpected return type from permission method: {}. "
+                "Supported types are bool, dict['message': str, 'code': int], str, int, (str, int)."
+            ).format(type(result)))
 
     def _get_action(self, action):
         """

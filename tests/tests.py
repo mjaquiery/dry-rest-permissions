@@ -143,11 +143,11 @@ class DummyViewSet(viewsets.ModelViewSet):
     def dummy_check_permission_fail_props(self, request, obj):
         for permission in self.get_permissions():
             if not permission.has_permission(request, self):
-                return {'message': permission.message, 'code': permission.code}
+                return {'message': getattr(permission, 'message', None), 'code': getattr(permission, 'code', None)}
 
         for permission in self.get_permissions():
             if not permission.has_object_permission(request, self, obj):
-                return {'message': permission.message, 'code': permission.code}
+                return {'message': getattr(permission, 'message', None), 'code': getattr(permission, 'code', None)}
 
         raise Exception("No failing permissions found")
 
@@ -195,10 +195,10 @@ class DRYRestPermissionsTests(TestCase):
             view.action = ars['action']
             request_name = "request_{action}".format(action=ars['action'])
             result = view.dummy_check_permission_fail_props(getattr(self, request_name), obj)
-            if 'assert_message' in ars:
-                self.assertEqual(result['message'], ars['assert_message'])
-            if 'assert_code' in ars:
-                self.assertEqual(result['code'], ars['assert_code'])
+            if 'message' in ars:
+                self.assertEqual(result.get('message', None), ars['message'])
+            if 'code' in ars:
+                self.assertEqual(result.get('code', None), ars['code'])
 
     def _run_dry_permission_field_checks(self, view, obj, assert_specific, assert_base):
         serializer = view.get_serializer_class()()
@@ -439,8 +439,11 @@ class DRYRestPermissionsTests(TestCase):
 
     def test_permissions_with_props(self):
         code = 9999  # This is a custom code so it doesn't clash with inbuilt ones
+
         class TestModel(DummyModel):
+
             status_code = code
+
             @classmethod
             def has_read_permission(cls, request):
                 return "read"
@@ -454,7 +457,7 @@ class DRYRestPermissionsTests(TestCase):
                 return {'message': "create", 'code': cls.status_code}
 
             @classmethod
-            def has_delete_permission(cls, request):
+            def has_destroy_permission(cls, request):
                 return "delete", cls.status_code
 
         class TestSerializer(DummySerializer):
