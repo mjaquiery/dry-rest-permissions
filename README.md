@@ -89,6 +89,11 @@ Specific action permissions take precedence over general read or write permissio
 
 The ``partial_update`` action is also supported, but by default is grouped with the update permission.
 
+## Custom message and status code for rejected permissions
+DRY Rest Permissions allows you to define a custom message and status code for rejected permissions. This is useful for returning some information to the client app about why a request was rejected.
+
+To produce a custom message and/or status code, permissions functions can return a dict with the keys ``message`` and ``code`` instead of a boolean. Returning a dict is interpreted as a rejection of the permission. Other complex return formats are allowed, but dicts are recommended.
+
 ## Add permissions to an API
 
 Permissions can be added to ModelViewSet based APIs.
@@ -195,6 +200,19 @@ class Project(models.Model):
     def has_object_publish_permission(self, request):
         return request.user == self.owner
 ``` 
+### Custom message and status code for rejected permissions
+If we wanted to add a little more detail to our permissions we could return a dict with a custom message and status code.
+```python
+class Project(models.Model):
+    owner = models.ForeignKey('User')
+    ...      
+    def has_object_write_permission(self, request):
+        if request.user == self.owner:
+            return True
+        return {'message': 'You must be the owner of this project to modify it.', 'code': 403}
+```
+We could also return a string (interpreted as the rejection message), an int (interpreted as the rejection status code), or a tuple of (message, code). Dicts are recommended for clarity. Both message and code keys are optional.
+
 ### Helpful decorators
 Three decorators were defined for common permission checks
 ``@allow_staff_or_superuser`` - Allows any user that has staff or superuser status to have the permission.

@@ -7,7 +7,7 @@ permission checks to be returned by the api per object so that
 they can be consumed by a front end application.
 """
 from functools import wraps
-from typing import Type, cast
+from typing import Type, cast, Tuple
 from django.db.models.query import QuerySet
 
 from rest_framework import filters
@@ -134,16 +134,16 @@ class DRYPermissions(permissions.BasePermission):
             action_method_name = "has_{action}_permission".format(action=action)
             # If the specific action permission exists then use it, otherwise use general.
             if hasattr(model_class, action_method_name):
-                return getattr(model_class, action_method_name)(request)
+                return self._process_permission_result(getattr(model_class, action_method_name)(request))
 
         if request.method in permissions.SAFE_METHODS:
             assert hasattr(model_class, 'has_read_permission'), \
                 self._get_error_message(model_class, 'has_read_permission', action_method_name)
-            return model_class.has_read_permission(request)  # type: ignore[attr-defined]
+            return self._process_permission_result(model_class.has_read_permission(request))  # type: ignore[attr-defined]
         else:
             assert hasattr(model_class, 'has_write_permission'), \
                 self._get_error_message(model_class, 'has_write_permission', action_method_name)
-            return model_class.has_write_permission(request)  # type: ignore[attr-defined]
+            return self._process_permission_result(model_class.has_write_permission(request))  # type: ignore[attr-defined]
 
     def has_object_permission(self, request, view, obj):
         """
@@ -160,16 +160,47 @@ class DRYPermissions(permissions.BasePermission):
             action_method_name = "has_object_{action}_permission".format(action=action)
             # If the specific action permission exists then use it, otherwise use general.
             if hasattr(obj, action_method_name):
-                return getattr(obj, action_method_name)(request)
+                return self._process_permission_result(getattr(obj, action_method_name)(request))
 
         if request.method in permissions.SAFE_METHODS:
             assert hasattr(obj, 'has_object_read_permission'), \
                 self._get_error_message(model_class, 'has_object_read_permission', action_method_name)
-            return obj.has_object_read_permission(request)
+            return self._process_permission_result(obj.has_object_read_permission(request))
         else:
             assert hasattr(obj, 'has_object_write_permission'), \
                 self._get_error_message(model_class, 'has_object_write_permission', action_method_name)
-            return obj.has_object_write_permission(request)
+            return self._process_permission_result(obj.has_object_write_permission(request))
+
+    def _process_permission_result(self, result: (bool, str, int, dict, Tuple[str, int])) -> bool:
+        """
+        Responses from permission methods can be in a variety of formats.
+        - str - will be used as the message
+        - int - will be used as the code
+        - dict - 'message' and 'code' keys will be used
+        - tuple - first item will be used as the message, second as the code
+        - Otherwise returned as is - usually the case for the default, bool
+
+        Setting self.message and self.code are side-effects, so this relies on the fact that
+        Django reinstantiates the permission class for each request in APIView.get_permissions().
+        """
+        if isinstance(result, str):
+            self.message = result
+            return False
+        if isinstance(result, int):
+            self.code = result
+            return False
+        if isinstance(result, dict):
+            if hasattr(result, 'code'):
+                self.code = result.code
+            if hasattr(result, 'message'):
+                self.message = result.message
+            return False
+        if isinstance(result, tuple):
+            if len(result) == 2:
+                self.message = result[0]
+                self.code = result[1]
+            return False
+        return result
 
     def _get_action(self, action):
         """

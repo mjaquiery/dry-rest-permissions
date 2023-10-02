@@ -140,6 +140,17 @@ class DummyViewSet(viewsets.ModelViewSet):
 
         return True
 
+    def dummy_check_permission_fail_props(self, request, obj):
+        for permission in self.get_permissions():
+            if not permission.has_permission(request, self):
+                return {'message': permission.message, 'code': permission.code}
+
+        for permission in self.get_permissions():
+            if not permission.has_object_permission(request, self, obj):
+                return {'message': permission.message, 'code': permission.code}
+
+        raise Exception("No failing permissions found")
+
 
 class DummyProfileViewSet(viewsets.ModelViewSet):
     queryset = BaseMixedModel.objects.all()
@@ -167,6 +178,27 @@ class DRYRestPermissionsTests(TestCase):
             request_name = "request_{action}".format(action=action)
             result = view.dummy_check_permission(getattr(self, request_name), obj)
             self.assertEqual(result, assert_value)
+
+    def _run_permission_props_checks(self, view, obj, action_response_sets=None):
+        """
+        Action-response sets should look like:
+        {'action': 'create', ['message': 'you are not allowed to create these objects', 'code': 403]}
+        At least one of message or code must be provided.
+        """
+        if action_response_sets is None:
+            raise Exception("No action-response-sets provided")
+        for ars in action_response_sets:
+            if 'action' not in ars:
+                raise ValueError("Action-response-sets must have an action")
+            if 'message' not in ars and 'code' not in ars:
+                raise ValueError("Action-response-sets must have a message or code")
+            view.action = ars['action']
+            request_name = "request_{action}".format(action=ars['action'])
+            result = view.dummy_check_permission_fail_props(getattr(self, request_name), obj)
+            if 'assert_message' in ars:
+                self.assertEqual(result['message'], ars['assert_message'])
+            if 'assert_code' in ars:
+                self.assertEqual(result['code'], ars['assert_code'])
 
     def _run_dry_permission_field_checks(self, view, obj, assert_specific, assert_base):
         serializer = view.get_serializer_class()()
@@ -404,6 +436,47 @@ class DRYRestPermissionsTests(TestCase):
 
         self._run_permission_checks(view, TestModel(), True)
         self._run_dry_permission_field_checks(view, TestModel(), True, True)
+
+    def test_permissions_with_props(self):
+        code = 9999  # This is a custom code so it doesn't clash with inbuilt ones
+        class TestModel(DummyModel):
+            status_code = code
+            @classmethod
+            def has_read_permission(cls, request):
+                return "read"
+
+            @classmethod
+            def has_write_permission(cls, request):
+                return cls.status_code  # This is a custom code so it doesn't clash with inbuilt ones
+
+            @classmethod
+            def has_create_permission(cls, request):
+                return {'message': "create", 'code': cls.status_code}
+
+            @classmethod
+            def has_delete_permission(cls, request):
+                return "delete", cls.status_code
+
+        class TestSerializer(DummySerializer):
+            class Meta:
+                model = TestModel
+                fields = '__all__'
+
+        class TestViewSet(DummyViewSet):
+            serializer_class = TestSerializer
+
+        view = TestViewSet()
+
+        self._run_permission_props_checks(
+            view,
+            TestModel(),
+            [
+                {'action': 'retrieve', 'message': 'read'},
+                {'action': 'update', 'code': code},
+                {'action': 'create', 'message': 'create', 'code': code},
+                {'action': 'destroy', 'message': 'delete', 'code': code},
+            ]
+        )
 
     def test_list_filter_backend(self):
         class DummyFilter(object):
